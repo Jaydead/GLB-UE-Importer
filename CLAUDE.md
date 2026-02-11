@@ -14,14 +14,29 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 - `ue5_bridge.py` — Wraps remote_execution for FBX import into UE5
 - `gui.py` — PySide6 GUI with worker thread for async pipeline execution
 
+## UE5 Import Logic
+- **Reimport** (asset exists): Import directly with `replace_existing=True` to preserve level references
+- **Fresh import** (asset new): Import to `_temp_import_` folder, then move to final destination (works around Interchange rename bug)
+- Materials auto-moved to `Materials/` subfolder
+- Temp folders cleaned up from both editor registry AND disk
+- Optional "FBX Output" folder keeps source FBX files permanently on disk
+
 ## Technical Details
 - `blender_process.py` uses `--` separator for argparse args after Blender's own args
 - FBX export uses UE5-compatible axis settings: `forward=-Z`, `up=Y`
 - GUI uses `QThread` + `QObject.moveToThread` pattern for async work
 - Blender detection order: `BLENDER_PATH` env → standard Windows path → `which` → Steam
-- UE5 remote execution: UDP multicast `239.0.0.1:6766` for discovery, TCP for commands
+- UE5 remote execution: UDP multicast `239.0.0.1:6766` for discovery, TCP port `6776` for commands
 - Multicast bind address must match UE5's setting (currently `127.0.0.1`, configured in `ue5_bridge.py`)
 - The client listens on TCP and UE5 connects to it (not the other way around)
+
+## UE5 5.6 Gotchas
+- `EditorAssetLibrary.fixup_redirectors_in_folder()` does NOT exist
+- `FbxImportUI` has no `is_reimport` property
+- Interchange aggressively renames assets even after deletion + GC
+- `EditorAssetLibrary.delete_directory()` only marks deleted in registry — must also delete physical folder
+- `run_command()` output is a **list** of log lines, not a string
+- Deleting + recreating an asset breaks level references — always reimport when asset exists
 
 ## Prerequisites
 - Python 3.10+, PySide6
