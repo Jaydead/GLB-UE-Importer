@@ -90,9 +90,11 @@ class ImportWorker(QObject):
             import_result = import_fbx(fbx_path, self.ue5_folder)
             self.progress.emit(95)
 
-            output = import_result.get("output", "")
+            output = import_result.get("output", [])
             if output:
-                self.status.emit(f"  [UE5] {output.strip()}")
+                lines = output if isinstance(output, list) else [output]
+                for line in lines:
+                    self.status.emit(f"  [UE5] {str(line).strip()}")
 
             self.progress.emit(100)
             self.finished.emit(True, f"Successfully imported '{stem}' to {self.ue5_folder}")
