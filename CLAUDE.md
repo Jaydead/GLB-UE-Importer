@@ -18,6 +18,7 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 - **Reimport** (asset exists): Import directly with `replace_existing=True` to preserve level references
 - **Fresh import** (asset new): Import to `_temp_import_` folder, then move to final destination (works around Interchange rename bug)
 - Materials auto-moved to `Materials/` subfolder
+- Optional "Complex as Simple" collision: sets `body_setup.collision_trace_flag` to `CTF_USE_COMPLEX_AS_SIMPLE` after import
 - Temp folders cleaned up from both editor registry AND disk
 - Optional "FBX Output" folder keeps source FBX files permanently on disk
 
@@ -37,6 +38,8 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 - `EditorAssetLibrary.delete_directory()` only marks deleted in registry — must also delete physical folder
 - `run_command()` output is a **list** of log lines, not a string
 - Deleting + recreating an asset breaks level references — always reimport when asset exists
+- Epic's `DEFAULT_RECEIVE_BUFFER_SIZE` is only 8 KB — overridden to 64 KB in `ue5_bridge.py` to avoid JSON truncation
+- `run_command()` can raise `RuntimeError` on long imports even when UE5 completes successfully — caught as warning
 
 ## Prerequisites
 - Python 3.10+, PySide6
