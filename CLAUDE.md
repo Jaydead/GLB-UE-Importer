@@ -20,6 +20,7 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 - GUI uses `QThread` + `QObject.moveToThread` pattern for async work
 - Blender detection order: `BLENDER_PATH` env → standard Windows path → `which` → Steam
 - UE5 remote execution: UDP multicast `239.0.0.1:6766` for discovery, TCP for commands
+- Multicast bind address must match UE5's setting (currently `127.0.0.1`, configured in `ue5_bridge.py`)
 - The client listens on TCP and UE5 connects to it (not the other way around)
 
 ## Prerequisites
