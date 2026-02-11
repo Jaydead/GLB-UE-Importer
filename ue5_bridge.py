@@ -3,7 +3,7 @@
 import time
 from pathlib import PureWindowsPath
 
-from remote_execution import RemoteExecution
+from remote_execution import RemoteExecution, RemoteExecutionConfig
 
 
 def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discovery_timeout: float = 10.0) -> dict:
@@ -21,7 +21,9 @@ def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discove
         ConnectionError: If no UE5 editor found within timeout.
         RuntimeError: If the import command fails.
     """
-    remote = RemoteExecution()
+    config = RemoteExecutionConfig()
+    config.multicast_bind_address = '127.0.0.1'
+    remote = RemoteExecution(config)
     remote.start()
 
     try:
