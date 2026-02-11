@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
@@ -33,11 +34,13 @@ class ImportWorker(QObject):
     progress = Signal(int)
     finished = Signal(bool, str)  # success, message
 
-    def __init__(self, glb_path, decimate_ratio, ue5_folder):
+    def __init__(self, glb_path, decimate_ratio, ue5_folder, import_materials, source_folder):
         super().__init__()
         self.glb_path = glb_path
         self.decimate_ratio = decimate_ratio
         self.ue5_folder = ue5_folder
+        self.import_materials = import_materials
+        self.source_folder = source_folder
 
     @Slot()
     def run(self):
@@ -60,10 +63,14 @@ class ImportWorker(QObject):
                 return
             self.status.emit(f"Found Blender: {blender}")
 
-            # Create temp directory for FBX
-            temp_dir = tempfile.mkdtemp(prefix="glb_importer_")
+            # Determine FBX output location
             stem = Path(self.glb_path).stem
-            fbx_path = os.path.join(temp_dir, f"{stem}.fbx")
+            if self.source_folder:
+                os.makedirs(self.source_folder, exist_ok=True)
+                fbx_path = os.path.join(self.source_folder, f"{stem}.fbx")
+            else:
+                temp_dir = tempfile.mkdtemp(prefix="glb_importer_")
+                fbx_path = os.path.join(temp_dir, f"{stem}.fbx")
 
             # Run Blender conversion
             self.status.emit("Processing GLB in Blender (this may take a while)...")
@@ -87,7 +94,7 @@ class ImportWorker(QObject):
             # Import into UE5
             self.status.emit("Connecting to UE5 Editor...")
             self.progress.emit(70)
-            import_result = import_fbx(fbx_path, self.ue5_folder)
+            import_result = import_fbx(fbx_path, self.ue5_folder, import_materials=self.import_materials)
             self.progress.emit(95)
 
             output = import_result.get("output", [])
@@ -97,12 +104,14 @@ class ImportWorker(QObject):
                     self.status.emit(f"  [UE5] {str(line).strip()}")
 
             self.progress.emit(100)
+            if self.source_folder:
+                self.status.emit(f"FBX saved to: {fbx_path}")
             self.finished.emit(True, f"Successfully imported '{stem}' to {self.ue5_folder}")
 
         except Exception as e:
             self.finished.emit(False, f"Error: {e}\n{traceback.format_exc()}")
         finally:
-            # Clean up temp files
+            # Clean up temp files (only if not using source folder)
             if temp_dir and os.path.exists(temp_dir):
                 try:
                     import shutil
@@ -152,11 +161,33 @@ class MainWindow(QMainWindow):
 
         settings_layout.addSpacing(20)
 
-        settings_layout.addWidget(QLabel("UE5 Folder:"))
-        self.ue5_folder_input = QLineEdit("/Game/Imports")
-        settings_layout.addWidget(self.ue5_folder_input)
+        self.import_materials_cb = QCheckBox("Import Materials")
+        self.import_materials_cb.setChecked(True)
+        settings_layout.addWidget(self.import_materials_cb)
+
+        settings_layout.addSpacing(20)
 
         layout.addLayout(settings_layout)
+
+        # Folder settings row
+        folder_layout = QHBoxLayout()
+
+        folder_layout.addWidget(QLabel("UE5 Folder:"))
+        self.ue5_folder_input = QLineEdit("/Game/Imports")
+        folder_layout.addWidget(self.ue5_folder_input)
+
+        folder_layout.addSpacing(20)
+
+        folder_layout.addWidget(QLabel("FBX Output:"))
+        self.source_folder_input = QLineEdit()
+        self.source_folder_input.setPlaceholderText("Leave empty for auto temp")
+        self.source_folder_input.setToolTip("Local folder to save the FBX file. Leave empty to use a temporary directory that gets cleaned up.")
+        folder_layout.addWidget(self.source_folder_input)
+        self.source_browse_btn = QPushButton("Browse...")
+        self.source_browse_btn.clicked.connect(self._browse_source_folder)
+        folder_layout.addWidget(self.source_browse_btn)
+
+        layout.addLayout(folder_layout)
 
         # Import button
         self.import_btn = QPushButton("Import to UE5")
@@ -201,6 +232,11 @@ class MainWindow(QMainWindow):
         if path:
             self.file_input.setText(path)
 
+    def _browse_source_folder(self):
+        path = QFileDialog.getExistingDirectory(self, "Select FBX Output Folder")
+        if path:
+            self.source_folder_input.setText(path)
+
     def _on_file_changed(self, text):
         self.import_btn.setEnabled(
             bool(text) and text.lower().endswith(".glb") and os.path.isfile(text)
@@ -214,10 +250,15 @@ class MainWindow(QMainWindow):
         glb_path = self.file_input.text().strip()
         decimate = self.decimate_spin.value()
         ue5_folder = self.ue5_folder_input.text().strip()
+        import_materials = self.import_materials_cb.isChecked()
+        source_folder = self.source_folder_input.text().strip() or ""
 
         self._log(f"Starting import: {Path(glb_path).name}")
         self._log(f"  Decimate ratio: {decimate}")
+        self._log(f"  Import materials: {import_materials}")
         self._log(f"  UE5 folder: {ue5_folder}")
+        if source_folder:
+            self._log(f"  Source folder: {source_folder}")
 
         # Disable controls during import
         self.import_btn.setEnabled(False)
@@ -226,7 +267,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
 
         # Create worker in thread
-        self._worker = ImportWorker(glb_path, decimate, ue5_folder)
+        self._worker = ImportWorker(glb_path, decimate, ue5_folder, import_materials, source_folder)
         self._worker_thread = QThread()
         self._worker.moveToThread(self._worker_thread)
 
