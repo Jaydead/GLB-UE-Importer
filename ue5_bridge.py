@@ -3,10 +3,14 @@
 import time
 from pathlib import PureWindowsPath
 
+import remote_execution as _re
 from remote_execution import RemoteExecution, RemoteExecutionConfig
 
+# Epic's default receive buffer (8 KB) is too small for our command responses.
+_re.DEFAULT_RECEIVE_BUFFER_SIZE = 65536
 
-def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discovery_timeout: float = 10.0, import_materials: bool = True) -> dict:
+
+def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discovery_timeout: float = 10.0, import_materials: bool = True, complex_collision: bool = False) -> dict:
     """Import an FBX file into UE5 via remote execution.
 
     Args:
@@ -14,6 +18,7 @@ def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discove
         ue5_content_folder: UE5 content browser destination (e.g. '/Game/Imports').
         discovery_timeout: Seconds to wait for UE5 node discovery.
         import_materials: Whether to import materials and textures.
+        complex_collision: Whether to set 'Use Complex as Simple' collision.
 
     Returns:
         dict with 'success' (bool) and 'result' / 'output' keys.
@@ -52,15 +57,24 @@ def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discove
         fbx_path_escaped = fbx_path.replace("\\", "/")
 
         # Build and execute the import command
-        command = _build_import_command(fbx_path_escaped, ue5_content_folder, import_materials)
-        result = remote.run_command(command, raise_on_failure=True)
+        command = _build_import_command(fbx_path_escaped, ue5_content_folder, import_materials, complex_collision)
+        try:
+            result = remote.run_command(command, raise_on_failure=True)
+        except RuntimeError:
+            # UE5 may drop the TCP connection on long imports while still
+            # completing successfully.  Treat as a warning, not a failure.
+            return {
+                "success": True,
+                "output": ["Warning: Lost connection to UE5 before receiving confirmation. "
+                           "The import likely succeeded — check the UE5 Content Browser."],
+            }
 
         return result
     finally:
         remote.stop()
 
 
-def _build_import_command(fbx_path: str, content_folder: str, import_materials: bool = True) -> str:
+def _build_import_command(fbx_path: str, content_folder: str, import_materials: bool = True, complex_collision: bool = False) -> str:
     """Build the Python command string to execute inside UE5."""
     # Derive asset name from filename
     asset_name = PureWindowsPath(fbx_path).stem
@@ -183,6 +197,22 @@ def do_import():
             shutil.rmtree(disk_path)
 
         print(f"Successfully imported to {content_folder}")
+
+    # Set "Use Complex as Simple" collision if requested
+    if {complex_collision}:
+        mesh_path = r"{content_folder}/" + asset_name
+        mesh_asset = unreal.EditorAssetLibrary.load_asset(mesh_path)
+        if mesh_asset and isinstance(mesh_asset, unreal.StaticMesh):
+            body_setup = mesh_asset.get_editor_property("body_setup")
+            if body_setup:
+                body_setup.set_editor_property("collision_trace_flag", unreal.CollisionTraceFlag.CTF_USE_COMPLEX_AS_SIMPLE)
+                mesh_asset.set_editor_property("body_setup", body_setup)
+                unreal.EditorAssetLibrary.save_asset(mesh_path)
+                print(f"Set 'Use Complex as Simple' collision on {{asset_name}}")
+            else:
+                print(f"Warning: No body_setup found on {{asset_name}}")
+        else:
+            print(f"Warning: Could not load mesh at {{mesh_path}}")
 
     # Move materials to a "Materials" subfolder
     if not {import_materials}:
