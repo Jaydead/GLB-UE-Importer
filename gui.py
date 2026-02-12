@@ -156,7 +156,7 @@ class MainWindow(QMainWindow):
         self.decimate_spin = QDoubleSpinBox()
         self.decimate_spin.setRange(0.0, 1.0)
         self.decimate_spin.setSingleStep(0.05)
-        self.decimate_spin.setValue(0.5)
+        self.decimate_spin.setValue(1.0)
         self.decimate_spin.setToolTip("1.0 = no reduction, 0.1 = aggressive reduction")
         settings_layout.addWidget(self.decimate_spin)
 
