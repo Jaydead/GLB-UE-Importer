@@ -15,11 +15,12 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 - `gui.py` — PySide6 GUI with worker thread for async pipeline execution
 
 ## UE5 Import Logic
-- **Reimport** (asset exists): Import directly with `replace_existing=True` to preserve level references
-- **Fresh import** (asset new): Import to `_temp_import_` folder, then move to final destination (works around Interchange rename bug)
+- Both reimport and fresh import use `replace_existing=True` + `replace_existing_settings=True` to ensure new options are applied
+- **Reimport** (asset exists): Import directly to preserve level references
+- **Fresh import** (asset new): Import directly to destination folder
+- Optional "Merge Meshes" (default on): controls `combine_meshes` on `FbxStaticMeshImportData`
+- Optional "Complex as Simple" collision: applied to all imported static meshes via `imported_object_paths`
 - Materials auto-moved to `Materials/` subfolder
-- Optional "Complex as Simple" collision: sets `body_setup.collision_trace_flag` to `CTF_USE_COMPLEX_AS_SIMPLE` after import
-- Temp folders cleaned up from both editor registry AND disk
 - Optional "FBX Output" folder keeps source FBX files permanently on disk
 
 ## Technical Details
@@ -34,6 +35,7 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 ## UE5 5.6 Gotchas
 - `EditorAssetLibrary.fixup_redirectors_in_folder()` does NOT exist
 - `FbxImportUI` has no `is_reimport` property
+- `AssetImportTask.replace_existing_settings` must be `True` to override stored import options on reimport
 - Interchange aggressively renames assets even after deletion + GC
 - `EditorAssetLibrary.delete_directory()` only marks deleted in registry — must also delete physical folder
 - `run_command()` output is a **list** of log lines, not a string
