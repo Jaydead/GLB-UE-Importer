@@ -6,7 +6,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
     QTextEdit,
@@ -222,6 +223,8 @@ class MainWindow(QMainWindow):
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setMinimumHeight(200)
+        self.log_output.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_output.customContextMenuRequested.connect(self._log_context_menu)
         layout.addWidget(self.log_output)
 
         # Enable drag and drop
@@ -257,6 +260,11 @@ class MainWindow(QMainWindow):
         self.import_btn.setEnabled(
             bool(text) and text.lower().endswith(".glb") and os.path.isfile(text)
         )
+
+    def _log_context_menu(self, pos):
+        menu = QMenu(self)
+        menu.addAction("Clear Log", self.log_output.clear)
+        menu.exec(self.log_output.mapToGlobal(pos))
 
     def _log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
