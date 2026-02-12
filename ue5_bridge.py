@@ -10,7 +10,7 @@ from remote_execution import RemoteExecution, RemoteExecutionConfig
 _re.DEFAULT_RECEIVE_BUFFER_SIZE = 65536
 
 
-def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discovery_timeout: float = 10.0, import_materials: bool = True, complex_collision: bool = False) -> dict:
+def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discovery_timeout: float = 10.0, import_materials: bool = True, complex_collision: bool = False, combine_meshes: bool = True) -> dict:
     """Import an FBX file into UE5 via remote execution.
 
     Args:
@@ -19,6 +19,7 @@ def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discove
         discovery_timeout: Seconds to wait for UE5 node discovery.
         import_materials: Whether to import materials and textures.
         complex_collision: Whether to set 'Use Complex as Simple' collision.
+        combine_meshes: Whether to merge all meshes into a single static mesh.
 
     Returns:
         dict with 'success' (bool) and 'result' / 'output' keys.
@@ -57,7 +58,7 @@ def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discove
         fbx_path_escaped = fbx_path.replace("\\", "/")
 
         # Build and execute the import command
-        command = _build_import_command(fbx_path_escaped, ue5_content_folder, import_materials, complex_collision)
+        command = _build_import_command(fbx_path_escaped, ue5_content_folder, import_materials, complex_collision, combine_meshes)
         try:
             result = remote.run_command(command, raise_on_failure=True)
         except RuntimeError:
@@ -74,7 +75,7 @@ def import_fbx(fbx_path: str, ue5_content_folder: str = "/Game/Imports", discove
         remote.stop()
 
 
-def _build_import_command(fbx_path: str, content_folder: str, import_materials: bool = True, complex_collision: bool = False) -> str:
+def _build_import_command(fbx_path: str, content_folder: str, import_materials: bool = True, complex_collision: bool = False, combine_meshes: bool = True) -> str:
     """Build the Python command string to execute inside UE5."""
     # Derive asset name from filename
     asset_name = PureWindowsPath(fbx_path).stem
@@ -83,8 +84,6 @@ def _build_import_command(fbx_path: str, content_folder: str, import_materials: 
 import unreal
 
 def do_import():
-    import uuid as _uuid
-
     # Clean up any leftover temp folders from previous runs
     import os, shutil
     content_dir = unreal.Paths.project_content_dir()
@@ -108,6 +107,7 @@ def do_import():
     asset_name = r"{asset_name}"
     final_path = r"{content_folder}/" + asset_name
     asset_exists = unreal.EditorAssetLibrary.does_asset_exist(final_path)
+    imported_mesh_paths = []
 
     if asset_exists:
         # REIMPORT: Import directly to preserve references
@@ -116,6 +116,7 @@ def do_import():
         task.set_editor_property("destination_path", r"{content_folder}")
         task.set_editor_property("destination_name", asset_name)
         task.set_editor_property("replace_existing", True)
+        task.set_editor_property("replace_existing_settings", True)
         task.set_editor_property("automated", True)
         task.set_editor_property("save", True)
 
@@ -124,7 +125,7 @@ def do_import():
         options.set_editor_property("import_textures", {import_materials})
         options.set_editor_property("import_materials", {import_materials})
         options.set_editor_property("import_as_skeletal", False)
-        options.static_mesh_import_data.set_editor_property("combine_meshes", True)
+        options.static_mesh_import_data.set_editor_property("combine_meshes", {combine_meshes})
         options.static_mesh_import_data.set_editor_property("auto_generate_collision", True)
         options.static_mesh_import_data.set_editor_property("generate_lightmap_u_vs", True)
         options.set_editor_property("import_animations", False)
@@ -134,20 +135,21 @@ def do_import():
 
         if task.get_editor_property("imported_object_paths"):
             paths = task.get_editor_property("imported_object_paths")
-            print(f"Reimported: {{list(paths)}}")
+            imported_mesh_paths = [str(p) for p in paths]
+            print(f"Reimported: {{imported_mesh_paths}}")
         else:
             print("Reimport completed but no assets were reported")
 
         print(f"Successfully reimported to {content_folder}")
 
     else:
-        # FRESH IMPORT: Use temp folder to work around Interchange rename issue
-        temp_folder = r"{content_folder}/_temp_import_" + _uuid.uuid4().hex[:8]
-
+        # FRESH IMPORT: Import directly to destination
         task = unreal.AssetImportTask()
         task.set_editor_property("filename", r"{fbx_path}")
-        task.set_editor_property("destination_path", temp_folder)
+        task.set_editor_property("destination_path", r"{content_folder}")
+        task.set_editor_property("destination_name", asset_name)
         task.set_editor_property("replace_existing", True)
+        task.set_editor_property("replace_existing_settings", True)
         task.set_editor_property("automated", True)
         task.set_editor_property("save", True)
 
@@ -156,7 +158,7 @@ def do_import():
         options.set_editor_property("import_textures", {import_materials})
         options.set_editor_property("import_materials", {import_materials})
         options.set_editor_property("import_as_skeletal", False)
-        options.static_mesh_import_data.set_editor_property("combine_meshes", True)
+        options.static_mesh_import_data.set_editor_property("combine_meshes", {combine_meshes})
         options.static_mesh_import_data.set_editor_property("auto_generate_collision", True)
         options.static_mesh_import_data.set_editor_property("generate_lightmap_u_vs", True)
         options.set_editor_property("import_animations", False)
@@ -166,53 +168,26 @@ def do_import():
 
         if task.get_editor_property("imported_object_paths"):
             paths = task.get_editor_property("imported_object_paths")
-            print(f"Imported: {{list(paths)}}")
+            imported_mesh_paths = [str(p) for p in paths]
+            print(f"Imported: {{imported_mesh_paths}}")
         else:
             print("Import completed but no assets were reported")
             return
-
-        # Move assets from temp folder to final destination
-        temp_assets = unreal.EditorAssetLibrary.list_assets(temp_folder, recursive=False)
-        for asset_path in temp_assets:
-            asset_path = str(asset_path)
-            name = asset_path.split("/")[-1].split(".")[0]
-            # Fix Interchange renaming: strip numeric suffix added to mesh name
-            if name != asset_name and name.startswith(asset_name):
-                suffix = name[len(asset_name):]
-                if suffix.isdigit():
-                    name = asset_name
-            dest = r"{content_folder}/" + name
-            if unreal.EditorAssetLibrary.does_asset_exist(dest):
-                unreal.EditorAssetLibrary.delete_asset(dest)
-                unreal.SystemLibrary.collect_garbage()
-            unreal.EditorAssetLibrary.rename_asset(asset_path, dest)
-
-        unreal.EditorAssetLibrary.delete_directory(temp_folder)
-
-        # Physically delete the temp folder from disk
-        content_dir = unreal.Paths.project_content_dir()
-        rel_path = temp_folder.replace("/Game/", "", 1)
-        disk_path = os.path.join(content_dir, rel_path)
-        if os.path.isdir(disk_path):
-            shutil.rmtree(disk_path)
 
         print(f"Successfully imported to {content_folder}")
 
     # Set "Use Complex as Simple" collision if requested
     if {complex_collision}:
-        mesh_path = r"{content_folder}/" + asset_name
-        mesh_asset = unreal.EditorAssetLibrary.load_asset(mesh_path)
-        if mesh_asset and isinstance(mesh_asset, unreal.StaticMesh):
-            body_setup = mesh_asset.get_editor_property("body_setup")
-            if body_setup:
-                body_setup.set_editor_property("collision_trace_flag", unreal.CollisionTraceFlag.CTF_USE_COMPLEX_AS_SIMPLE)
-                mesh_asset.set_editor_property("body_setup", body_setup)
-                unreal.EditorAssetLibrary.save_asset(mesh_path)
-                print(f"Set 'Use Complex as Simple' collision on {{asset_name}}")
-            else:
-                print(f"Warning: No body_setup found on {{asset_name}}")
-        else:
-            print(f"Warning: Could not load mesh at {{mesh_path}}")
+        for mesh_path in imported_mesh_paths:
+            mesh_asset = unreal.EditorAssetLibrary.load_asset(mesh_path)
+            if mesh_asset and isinstance(mesh_asset, unreal.StaticMesh):
+                body_setup = mesh_asset.get_editor_property("body_setup")
+                if body_setup:
+                    body_setup.set_editor_property("collision_trace_flag", unreal.CollisionTraceFlag.CTF_USE_COMPLEX_AS_SIMPLE)
+                    mesh_asset.set_editor_property("body_setup", body_setup)
+                    unreal.EditorAssetLibrary.save_asset(mesh_path)
+                    mesh_name = mesh_path.split("/")[-1]
+                    print(f"Set 'Use Complex as Simple' collision on {{mesh_name}}")
 
     # Move materials to a "Materials" subfolder
     if not {import_materials}:

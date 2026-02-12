@@ -34,13 +34,14 @@ class ImportWorker(QObject):
     progress = Signal(int)
     finished = Signal(bool, str)  # success, message
 
-    def __init__(self, glb_path, decimate_ratio, ue5_folder, import_materials, complex_collision, source_folder):
+    def __init__(self, glb_path, decimate_ratio, ue5_folder, import_materials, complex_collision, merge_meshes, source_folder):
         super().__init__()
         self.glb_path = glb_path
         self.decimate_ratio = decimate_ratio
         self.ue5_folder = ue5_folder
         self.import_materials = import_materials
         self.complex_collision = complex_collision
+        self.merge_meshes = merge_meshes
         self.source_folder = source_folder
 
     @Slot()
@@ -95,7 +96,7 @@ class ImportWorker(QObject):
             # Import into UE5
             self.status.emit("Connecting to UE5 Editor...")
             self.progress.emit(70)
-            import_result = import_fbx(fbx_path, self.ue5_folder, import_materials=self.import_materials, complex_collision=self.complex_collision)
+            import_result = import_fbx(fbx_path, self.ue5_folder, import_materials=self.import_materials, complex_collision=self.complex_collision, combine_meshes=self.merge_meshes)
             self.progress.emit(95)
 
             output = import_result.get("output", [])
@@ -172,6 +173,13 @@ class MainWindow(QMainWindow):
         self.complex_collision_cb.setChecked(False)
         self.complex_collision_cb.setToolTip("Use the mesh geometry as collision (instead of simplified collision shapes)")
         settings_layout.addWidget(self.complex_collision_cb)
+
+        settings_layout.addSpacing(20)
+
+        self.merge_meshes_cb = QCheckBox("Merge Meshes")
+        self.merge_meshes_cb.setChecked(True)
+        self.merge_meshes_cb.setToolTip("Combine all meshes into a single static mesh on import")
+        settings_layout.addWidget(self.merge_meshes_cb)
 
         settings_layout.addSpacing(20)
 
@@ -260,12 +268,14 @@ class MainWindow(QMainWindow):
         ue5_folder = self.ue5_folder_input.text().strip()
         import_materials = self.import_materials_cb.isChecked()
         complex_collision = self.complex_collision_cb.isChecked()
+        merge_meshes = self.merge_meshes_cb.isChecked()
         source_folder = self.source_folder_input.text().strip() or ""
 
         self._log(f"Starting import: {Path(glb_path).name}")
         self._log(f"  Decimate ratio: {decimate}")
         self._log(f"  Import materials: {import_materials}")
         self._log(f"  Complex as simple collision: {complex_collision}")
+        self._log(f"  Merge meshes: {merge_meshes}")
         self._log(f"  UE5 folder: {ue5_folder}")
         if source_folder:
             self._log(f"  Source folder: {source_folder}")
@@ -277,7 +287,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
 
         # Create worker in thread
-        self._worker = ImportWorker(glb_path, decimate, ue5_folder, import_materials, complex_collision, source_folder)
+        self._worker = ImportWorker(glb_path, decimate, ue5_folder, import_materials, complex_collision, merge_meshes, source_folder)
         self._worker_thread = QThread()
         self._worker.moveToThread(self._worker_thread)
 
