@@ -1,7 +1,7 @@
 # GLB to UE5 Importer
 
 ## Project Overview
-Desktop tool that takes a `.glb` file, processes it through Blender (headless), and imports the result into UE5 via Python remote execution. One-click pipeline: GLB → Decimate → FBX → UE5.
+Desktop tool that takes a `.glb` file, processes it through Blender (headless), and imports the result into UE5 via Python remote execution. One-click pipeline: GLB → Merge Child Meshes → Decimate → FBX → UE5.
 
 ## Architecture
 - `main.py` → `gui.py` (PySide6 UI) → `blender_bridge.py` → `scripts/blender_process.py` (runs inside Blender)
@@ -13,6 +13,13 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 - `blender_bridge.py` — Finds Blender install, runs it as subprocess
 - `ue5_bridge.py` — Wraps remote_execution for FBX import into UE5
 - `gui.py` — PySide6 GUI with worker thread for async pipeline execution
+
+## Blender Processing
+- Optional "Merge Child Meshes" (default on): merges mesh children under EMPTY parents into single meshes
+  - Single child mesh: reparented to world, renamed to parent's name
+  - Multiple child meshes: joined into one mesh, renamed to parent's name
+  - Childless empties cleaned up after merge
+- Decimation applied after merge via `--decimate` ratio
 
 ## UE5 Import Logic
 - Both reimport and fresh import use `replace_existing=True` + `replace_existing_settings=True` to ensure new options are applied
@@ -27,6 +34,8 @@ Desktop tool that takes a `.glb` file, processes it through Blender (headless), 
 - `blender_process.py` uses `--` separator for argparse args after Blender's own args
 - FBX export uses UE5-compatible axis settings: `forward=-Z`, `up=Y`
 - GUI uses `QThread` + `QObject.moveToThread` pattern for async work
+- GUI settings persisted to `settings.ini` (INI format via `QSettings`, gitignored) — restores all options and window geometry on launch
+- GUI organized into Blender settings row, UE5 settings row, and folder paths row
 - Blender detection order: `BLENDER_PATH` env → standard Windows path → `which` → Steam
 - UE5 remote execution: UDP multicast `239.0.0.1:6766` for discovery, TCP port `6776` for commands
 - Multicast bind address must match UE5's setting (currently `127.0.0.1`, configured in `ue5_bridge.py`)
