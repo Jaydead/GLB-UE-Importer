@@ -6,7 +6,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QSettings, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -35,7 +35,7 @@ class ImportWorker(QObject):
     progress = Signal(int)
     finished = Signal(bool, str)  # success, message
 
-    def __init__(self, glb_path, decimate_ratio, ue5_folder, import_materials, complex_collision, merge_meshes, source_folder):
+    def __init__(self, glb_path, decimate_ratio, ue5_folder, import_materials, complex_collision, merge_meshes, merge_children, source_folder):
         super().__init__()
         self.glb_path = glb_path
         self.decimate_ratio = decimate_ratio
@@ -43,6 +43,7 @@ class ImportWorker(QObject):
         self.import_materials = import_materials
         self.complex_collision = complex_collision
         self.merge_meshes = merge_meshes
+        self.merge_children = merge_children
         self.source_folder = source_folder
 
     @Slot()
@@ -78,7 +79,7 @@ class ImportWorker(QObject):
             # Run Blender conversion
             self.status.emit("Processing GLB in Blender (this may take a while)...")
             self.progress.emit(15)
-            result = process_glb(self.glb_path, self.decimate_ratio, fbx_path)
+            result = process_glb(self.glb_path, self.decimate_ratio, fbx_path, merge_children=self.merge_children)
             self.status.emit("Blender processing complete")
             self.progress.emit(60)
 
@@ -151,40 +152,56 @@ class MainWindow(QMainWindow):
         file_layout.addWidget(self.browse_btn)
         layout.addLayout(file_layout)
 
-        # Settings row
-        settings_layout = QHBoxLayout()
+        # Blender settings row
+        blender_layout = QHBoxLayout()
+        blender_layout.addWidget(QLabel("Blender:"))
 
-        settings_layout.addWidget(QLabel("Decimate Ratio:"))
+        blender_layout.addSpacing(10)
+
+        blender_layout.addWidget(QLabel("Decimate Ratio:"))
         self.decimate_spin = QDoubleSpinBox()
         self.decimate_spin.setRange(0.0, 1.0)
         self.decimate_spin.setSingleStep(0.05)
         self.decimate_spin.setValue(1.0)
         self.decimate_spin.setToolTip("1.0 = no reduction, 0.1 = aggressive reduction")
-        settings_layout.addWidget(self.decimate_spin)
+        blender_layout.addWidget(self.decimate_spin)
 
-        settings_layout.addSpacing(20)
+        blender_layout.addSpacing(20)
+
+        self.merge_children_cb = QCheckBox("Merge Child Meshes")
+        self.merge_children_cb.setChecked(True)
+        self.merge_children_cb.setToolTip("In Blender, merge child meshes under empty parent objects into single meshes before export")
+        blender_layout.addWidget(self.merge_children_cb)
+
+        blender_layout.addStretch()
+        layout.addLayout(blender_layout)
+
+        # UE5 settings row
+        ue5_layout = QHBoxLayout()
+        ue5_layout.addWidget(QLabel("UE5:"))
+
+        ue5_layout.addSpacing(10)
 
         self.import_materials_cb = QCheckBox("Import Materials")
         self.import_materials_cb.setChecked(True)
-        settings_layout.addWidget(self.import_materials_cb)
+        ue5_layout.addWidget(self.import_materials_cb)
 
-        settings_layout.addSpacing(20)
+        ue5_layout.addSpacing(20)
 
         self.complex_collision_cb = QCheckBox("Complex as Simple Collision")
         self.complex_collision_cb.setChecked(False)
         self.complex_collision_cb.setToolTip("Use the mesh geometry as collision (instead of simplified collision shapes)")
-        settings_layout.addWidget(self.complex_collision_cb)
+        ue5_layout.addWidget(self.complex_collision_cb)
 
-        settings_layout.addSpacing(20)
+        ue5_layout.addSpacing(20)
 
         self.merge_meshes_cb = QCheckBox("Merge Meshes")
         self.merge_meshes_cb.setChecked(True)
         self.merge_meshes_cb.setToolTip("Combine all meshes into a single static mesh on import")
-        settings_layout.addWidget(self.merge_meshes_cb)
+        ue5_layout.addWidget(self.merge_meshes_cb)
 
-        settings_layout.addSpacing(20)
-
-        layout.addLayout(settings_layout)
+        ue5_layout.addStretch()
+        layout.addLayout(ue5_layout)
 
         # Folder settings row
         folder_layout = QHBoxLayout()
@@ -229,6 +246,36 @@ class MainWindow(QMainWindow):
 
         # Enable drag and drop
         self.setAcceptDrops(True)
+
+        # Restore saved settings
+        self._load_settings()
+
+    def _load_settings(self):
+        s = QSettings(str(Path(__file__).parent / "settings.ini"), QSettings.IniFormat)
+        if s.contains("geometry"):
+            self.restoreGeometry(s.value("geometry"))
+        self.decimate_spin.setValue(float(s.value("decimate_ratio", 1.0)))
+        self.merge_children_cb.setChecked(s.value("merge_children", "true") == "true")
+        self.import_materials_cb.setChecked(s.value("import_materials", "true") == "true")
+        self.complex_collision_cb.setChecked(s.value("complex_collision", "false") == "true")
+        self.merge_meshes_cb.setChecked(s.value("merge_meshes", "true") == "true")
+        self.ue5_folder_input.setText(s.value("ue5_folder", "/Game/Imports"))
+        self.source_folder_input.setText(s.value("source_folder", ""))
+
+    def _save_settings(self):
+        s = QSettings(str(Path(__file__).parent / "settings.ini"), QSettings.IniFormat)
+        s.setValue("geometry", self.saveGeometry())
+        s.setValue("decimate_ratio", self.decimate_spin.value())
+        s.setValue("merge_children", "true" if self.merge_children_cb.isChecked() else "false")
+        s.setValue("import_materials", "true" if self.import_materials_cb.isChecked() else "false")
+        s.setValue("complex_collision", "true" if self.complex_collision_cb.isChecked() else "false")
+        s.setValue("merge_meshes", "true" if self.merge_meshes_cb.isChecked() else "false")
+        s.setValue("ue5_folder", self.ue5_folder_input.text())
+        s.setValue("source_folder", self.source_folder_input.text())
+
+    def closeEvent(self, event):
+        self._save_settings()
+        super().closeEvent(event)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -277,6 +324,7 @@ class MainWindow(QMainWindow):
         import_materials = self.import_materials_cb.isChecked()
         complex_collision = self.complex_collision_cb.isChecked()
         merge_meshes = self.merge_meshes_cb.isChecked()
+        merge_children = self.merge_children_cb.isChecked()
         source_folder = self.source_folder_input.text().strip() or ""
 
         self._log(f"Starting import: {Path(glb_path).name}")
@@ -284,6 +332,7 @@ class MainWindow(QMainWindow):
         self._log(f"  Import materials: {import_materials}")
         self._log(f"  Complex as simple collision: {complex_collision}")
         self._log(f"  Merge meshes: {merge_meshes}")
+        self._log(f"  Merge child meshes: {merge_children}")
         self._log(f"  UE5 folder: {ue5_folder}")
         if source_folder:
             self._log(f"  Source folder: {source_folder}")
@@ -295,7 +344,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
 
         # Create worker in thread
-        self._worker = ImportWorker(glb_path, decimate, ue5_folder, import_materials, complex_collision, merge_meshes, source_folder)
+        self._worker = ImportWorker(glb_path, decimate, ue5_folder, import_materials, complex_collision, merge_meshes, merge_children, source_folder)
         self._worker_thread = QThread()
         self._worker.moveToThread(self._worker_thread)
 

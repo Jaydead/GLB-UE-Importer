@@ -50,6 +50,7 @@ def process_glb(
     glb_path: str,
     decimate_ratio: float,
     output_fbx_path: str,
+    merge_children: bool = False,
     timeout: int = 300,
 ) -> subprocess.CompletedProcess:
     """Run Blender headless to convert GLB to FBX.
@@ -90,6 +91,8 @@ def process_glb(
         "--decimate",
         str(decimate_ratio),
     ]
+    if merge_children:
+        cmd.append("--merge-children")
 
     result = subprocess.run(
         cmd,

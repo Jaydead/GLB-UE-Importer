@@ -22,6 +22,11 @@ def parse_args():
         default=0.5,
         help="Decimate ratio (0.0-1.0, default 0.5)",
     )
+    parser.add_argument(
+        "--merge-children",
+        action="store_true",
+        help="Merge child meshes under EMPTY parents into single meshes",
+    )
     return parser.parse_args(argv)
 
 
@@ -49,6 +54,67 @@ def import_glb(filepath):
     print(f"Importing: {filepath}")
     bpy.ops.import_scene.gltf(filepath=filepath)
     print(f"Imported {len(bpy.context.selected_objects)} objects")
+
+
+def merge_mesh_groups():
+    """Merge mesh children under EMPTY parents into single meshes.
+
+    GLB files import with EMPTY parent objects containing MESH children.
+    This merges each group into a single mesh with the parent's name.
+    """
+    # Find all EMPTY objects that have MESH children
+    empty_parents = []
+    for obj in bpy.data.objects:
+        if obj.type == "EMPTY":
+            mesh_children = [c for c in obj.children if c.type == "MESH"]
+            if mesh_children:
+                empty_parents.append((obj, mesh_children))
+
+    print(f"Found {len(empty_parents)} parent groups with meshes")
+
+    for parent, mesh_children in empty_parents:
+        parent_name = parent.name
+
+        # Clear parent on mesh children (keep world transforms)
+        bpy.ops.object.select_all(action="DESELECT")
+        for child in mesh_children:
+            child.select_set(True)
+        bpy.ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
+
+        # Rename parent to free up the name for the merged mesh
+        parent.name = parent_name + "__to_delete"
+
+        if len(mesh_children) == 1:
+            print(f"Reparenting single mesh under '{parent_name}'")
+            mesh_children[0].name = parent_name
+        else:
+            print(f"Merging {len(mesh_children)} meshes under '{parent_name}'")
+            bpy.ops.object.select_all(action="DESELECT")
+            for child in mesh_children:
+                child.select_set(True)
+            bpy.context.view_layer.objects.active = mesh_children[0]
+            bpy.ops.object.join()
+            bpy.context.active_object.name = parent_name
+
+    # Delete processed empty parents
+    bpy.ops.object.select_all(action="DESELECT")
+    for parent, _ in empty_parents:
+        if parent.name in bpy.data.objects:
+            bpy.data.objects[parent.name].select_set(True)
+    if bpy.context.selected_objects:
+        bpy.ops.object.delete()
+
+    # Clean up any remaining childless empties (e.g., root nodes from GLB)
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in bpy.data.objects:
+        if obj.type == "EMPTY" and len(obj.children) == 0:
+            obj.select_set(True)
+    if bpy.context.selected_objects:
+        print(f"Cleaning up {len(bpy.context.selected_objects)} childless empties")
+        bpy.ops.object.delete()
+
+    remaining = [obj for obj in bpy.data.objects if obj.type == "MESH"]
+    print(f"Total meshes after merging: {len(remaining)}")
 
 
 def decimate_meshes(ratio):
@@ -101,6 +167,8 @@ def main():
     args = parse_args()
     clean_scene()
     import_glb(args.input)
+    if args.merge_children:
+        merge_mesh_groups()
     decimate_meshes(args.decimate)
     apply_transforms()
     export_fbx(args.output)
